@@ -1,0 +1,30 @@
+# Godot 4 ignores
+.godot/
+*.import
+*.translation
+export.cfg
+export_presets.cfg
+
+# Logs
+Project/logs/
+logs/
+
+# Godot 引擎可执行文件 (太大, 不入库)
+Godot_v*.exe/
+Godot_v*_console.exe
+
+# Aion 工具元数据
+.aionrs/
+.aionrs
+.gemini/
+.claude/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Word 源文件 (md 已经导出)
+*.docx
+*.xlsx
