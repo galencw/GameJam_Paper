@@ -13,8 +13,8 @@ const COL_BORDER: Color = Color("#3a4a6a")
 const COL_TEXT: Color = Color("#ffffff")
 const COL_TEXT_DIM: Color = Color("#9aa7c0")
 const COL_GOLD: Color = Color("#ffd166")
-const COL_UP: Color = Color("#06d6a0")
-const COL_DOWN: Color = Color("#ef476f")
+const COL_UP: Color = Color("#ef476f")          # A股配色: 涨 = 红
+const COL_DOWN: Color = Color("#06d6a0")        # A股配色: 跌 = 绿
 const COL_BLUE: Color = Color("#118ab2")
 const COL_GREEN: Color = Color("#06d6a0")
 const COL_YELLOW: Color = Color("#ffd166")
@@ -22,10 +22,14 @@ const COL_RED: Color = Color("#ef476f")
 const COL_HIGHLIGHT: Color = Color("#ffae42")
 const COL_AP_ON: Color = Color("#5cd5ff")
 const COL_AP_OFF: Color = Color("#33425c")
-const COL_BULL: Color = Color("#06d6a0")
-const COL_BEAR: Color = Color("#ef476f")
+const COL_BULL: Color = Color("#ef476f")        # 上涨情绪 = 红
+const COL_BEAR: Color = Color("#06d6a0")        # 下跌情绪 = 绿
+# 背景情绪渐变端点 (bull=50 用 COL_BG; bull=100 → 深红, bull=0 → 深绿)
+const COL_BG_BULL_MAX: Color = Color("#a01e3f") # 极度狂热: 鲜红 (提亮 / 高饱和)
+const COL_BG_BEAR_MAX: Color = Color("#0e8a52") # 极度恐慌: 鲜绿 (提亮 / 高饱和)
 
 # ===== 节点引用 (顶部) =====
+var bg_rect: ColorRect          # 全屏背景, 随市场情绪渐变 (中性蓝 → 红 / 绿)
 var lbl_day: Label
 var lbl_turn: Label
 var lbl_price_top: Label
@@ -35,20 +39,29 @@ var btn_pause: Button
 var btn_play: Button
 var btn_ff: Button
 
-# ===== 左侧四色金钱柱 =====
-var money_bar_marker: ColorRect
+# 突发事件按钮悬停下拉信息栏
+var event_tip_panel: PanelContainer
+var lbl_event_tip_title: Label
+var lbl_event_tip_desc: Label
+var lbl_event_tip_effect: Label
 
-# ===== 右侧目标进度条 (竖向, 在数据面板右侧 40px 槽) =====
-var money_target_bg: ColorRect       # 黑色背景
-var money_target_fill: ColorRect     # 黄色填充 (底部向上)
-var money_target_max_h: float = 378.0
-var money_target_bottom_y: float = 0.0
-var money_target_max_w: float = 0.0  # 已废弃, 保留占位
-var lbl_money_target: Label          # 已废弃, 防引用
-var lbl_money_progress: Label        # 显示百分比 (竖条下方)
+# ===== 左侧总资金条 =====
+# 黑底 + 蓝段(现金, 底向上) + 黄段(持仓市值, 叠在蓝段上) + 目标横线(白)
+var money_bar_cash: ColorRect       # 蓝段 - 现金
+var money_bar_holding: ColorRect    # 黄段 - 持仓市值
+var money_bar_target_line: ColorRect # 目标位白色横线
+var money_bar_target_label: Label    # 目标位左侧 "目标 ¥..." 小字
+var money_bar_bg_x: float = 0.0
+var money_bar_bg_y: float = 0.0
+var money_bar_bg_w: float = 0.0
+var money_bar_bg_h: float = 0.0
+var money_bar_full_value: float = 200000.0  # 满刻度 (START_CASH × 2)
 
 # ===== 行动力费用条 =====
 var lbl_card_cost_hint: Label
+
+# ===== BGM =====
+var bgm_player: AudioStreamPlayer
 
 # ===== 中央 K 线区 =====
 var k_chart: Control
@@ -62,7 +75,6 @@ var lbl_holding_value: Label
 var lbl_pnl: Label
 var lbl_pnl_pct: Label
 var lbl_total_assets: Label
-var lbl_target: Label
 
 # ===== 情绪显示 (移到顶栏) =====
 var lbl_bull: Label
@@ -122,6 +134,9 @@ func _ready() -> void:
 	Game.shop_entered.connect(_on_shop_entered)
 	Game.shop_changed.connect(_refresh_shop)
 	Game.phase_changed.connect(_on_phase_changed)
+	Game.event_triggered.connect(_on_event_triggered)
+	# BGM
+	_start_bgm()
 	# 启动新一关
 	Game.new_level()
 
@@ -130,12 +145,12 @@ func _ready() -> void:
 # UI 构建
 # ============================================================
 func _build_ui() -> void:
-	# 背景
-	var bg := ColorRect.new()
-	bg.color = COL_BG
-	bg.anchor_right = 1.0
-	bg.anchor_bottom = 1.0
-	add_child(bg)
+	# 背景 (随情绪渐变 → bg_rect.color 在 _refresh_state 里动态更新)
+	bg_rect = ColorRect.new()
+	bg_rect.color = COL_BG
+	bg_rect.anchor_right = 1.0
+	bg_rect.anchor_bottom = 1.0
+	add_child(bg_rect)
 	_build_top_bar()
 	_build_left_money_bar()
 	_build_chart_area()
@@ -145,6 +160,7 @@ func _build_ui() -> void:
 	_build_log_overlay()
 	_build_end_dialog()
 	_build_shop_overlay()
+	_build_event_tip()
 
 
 func _build_top_bar() -> void:
@@ -182,8 +198,10 @@ func _build_top_bar() -> void:
 	btn_emotion = _button("情绪详情", COL_GOLD, 11)
 	btn_emotion.custom_minimum_size = Vector2(76, 24)
 	hb.add_child(btn_emotion)
-	btn_event = _button("突发事件", COL_GOLD, 11)
-	btn_event.custom_minimum_size = Vector2(76, 24)
+	btn_event = _button("今日事件 —", COL_TEXT_DIM, 11)
+	btn_event.custom_minimum_size = Vector2(220, 24)
+	btn_event.mouse_entered.connect(_on_event_btn_hover)
+	btn_event.mouse_exited.connect(_on_event_btn_unhover)
 	hb.add_child(btn_event)
 	btn_pause = _button("⏸", COL_TEXT_DIM, 11)
 	btn_pause.custom_minimum_size = Vector2(28, 24)
@@ -197,34 +215,54 @@ func _build_top_bar() -> void:
 
 
 func _build_left_money_bar() -> void:
-	# 仅四色金钱柱 + 现金 marker. 目标进度条已移到右侧数据面板.
+	# 总资金条: 黑底 + 蓝段(现金) + 黄段(持仓市值, 叠在蓝上) + 目标横线(白)
 	var panel := _make_panel(Vector2(8, 52), Vector2(56, 460))
-	var lbl := _label("现金", 11, COL_TEXT_DIM)
+	var lbl := _label("总资金", 11, COL_TEXT_DIM)
 	lbl.position = Vector2(8, 4)
 	panel.add_child(lbl)
-	# 四色段 (从顶到底: 蓝 / 绿 / 黄 / 红)
-	var rect_y_start: float = 20.0
-	var bar_h: float = 432.0
-	var seg_h: float = bar_h / 4.0
-	var seg_w: float = 28.0
-	var seg_x: float = 14.0
-	var colors: Array = [COL_BLUE, COL_GREEN, COL_YELLOW, COL_RED]
-	for i in range(4):
-		var seg := ColorRect.new()
-		seg.color = colors[i]
-		seg.position = Vector2(seg_x, rect_y_start + float(i) * seg_h)
-		seg.size = Vector2(seg_w, seg_h - 2.0)
-		panel.add_child(seg)
-	# 当前现金 marker (横线)
-	money_bar_marker = ColorRect.new()
-	money_bar_marker.color = COL_TEXT
-	money_bar_marker.size = Vector2(seg_w + 8, 2)
-	money_bar_marker.position = Vector2(seg_x - 4, rect_y_start)
-	panel.add_child(money_bar_marker)
+	# 满刻度 = START_CASH × 2 (与 game_state 保持一致)
+	money_bar_full_value = Game.START_CASH * 2.0
+	# 黑色背景柱
+	money_bar_bg_x = 14.0
+	money_bar_bg_y = 20.0
+	money_bar_bg_w = 28.0
+	money_bar_bg_h = 432.0
+	var bg := ColorRect.new()
+	bg.color = Color.BLACK
+	bg.position = Vector2(money_bar_bg_x, money_bar_bg_y)
+	bg.size = Vector2(money_bar_bg_w, money_bar_bg_h)
+	panel.add_child(bg)
+	# 蓝段 - 现金 (从底向上)
+	money_bar_cash = ColorRect.new()
+	money_bar_cash.color = COL_BLUE
+	money_bar_cash.position = Vector2(money_bar_bg_x, money_bar_bg_y + money_bar_bg_h)
+	money_bar_cash.size = Vector2(money_bar_bg_w, 0.0)
+	panel.add_child(money_bar_cash)
+	# 黄段 - 持仓市值 (叠在蓝段上)
+	money_bar_holding = ColorRect.new()
+	money_bar_holding.color = COL_YELLOW
+	money_bar_holding.position = Vector2(money_bar_bg_x, money_bar_bg_y + money_bar_bg_h)
+	money_bar_holding.size = Vector2(money_bar_bg_w, 0.0)
+	panel.add_child(money_bar_holding)
+	# 目标位白色横线
+	var target_ratio: float = clamp(Game.VICTORY_TARGET / money_bar_full_value, 0.0, 1.0)
+	var target_y: float = money_bar_bg_y + (1.0 - target_ratio) * money_bar_bg_h
+	money_bar_target_line = ColorRect.new()
+	money_bar_target_line.color = COL_TEXT
+	money_bar_target_line.position = Vector2(money_bar_bg_x - 4, target_y - 1)
+	money_bar_target_line.size = Vector2(money_bar_bg_w + 8, 2)
+	panel.add_child(money_bar_target_line)
+	# 目标位左侧小字
+	money_bar_target_label = _label("目标\n¥%s" % _fmt_money(Game.VICTORY_TARGET), 9, COL_TEXT_DIM)
+	money_bar_target_label.position = Vector2(2, target_y - 18)
+	money_bar_target_label.size = Vector2(48, 20)
+	money_bar_target_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	panel.add_child(money_bar_target_label)
 
 
 func _build_chart_area() -> void:
 	var panel := _make_panel(Vector2(72, 52), Vector2(820, 412))
+	panel.add_theme_stylebox_override("panel", _panel_stylebox_translucent(0.35))
 	# 标题
 	var title := _label("价格图表  (上: 回合K · 下: 分时K)", 11, COL_TEXT_DIM)
 	title.position = Vector2(10, 4)
@@ -240,9 +278,10 @@ func _build_chart_area() -> void:
 func _build_right_panel() -> void:
 	# 数据面板 372×460. 文字区收窄到左 308 宽, 右边留 40 宽给竖向目标进度条.
 	var panel := _make_panel(Vector2(900, 52), Vector2(372, 460))
+	panel.add_theme_stylebox_override("panel", _panel_stylebox_translucent(0.35))
 	var vb := VBoxContainer.new()
 	vb.position = Vector2(12, 8)
-	vb.size = Vector2(308, 444)
+	vb.size = Vector2(348, 444)
 	vb.add_theme_constant_override("separation", 4)
 	panel.add_child(vb)
 
@@ -276,55 +315,10 @@ func _build_right_panel() -> void:
 	vb.add_child(lbl_pnl_pct)
 	vb.add_child(_h_sep())
 
-	# 总资产 + 目标进度条 (横向 ColorRect)
+	# 总资产 (目标进度条已移到左侧总资金条)
 	vb.add_child(_label("总资产", 10, COL_TEXT_DIM))
 	lbl_total_assets = _label("¥100,000", 14, COL_TEXT)
 	vb.add_child(lbl_total_assets)
-	lbl_target = _label("目标 ¥120K  ·  0%", 11, COL_TEXT_DIM)
-	vb.add_child(lbl_target)
-	# 竖向目标进度条 (放在 panel 右侧 40px 留白槽; 黑底 + 底部向上的黄色填充)
-	# panel 内坐标: x=332 (panel 宽 372 - 40 槽)
-	var bar_x: float = 336.0
-	var bar_y: float = 24.0
-	var bar_w_v: float = 24.0
-	var bar_h_v: float = 380.0
-	money_target_max_h = bar_h_v - 2.0
-	money_target_bottom_y = bar_y + 1.0 + money_target_max_h
-	# 顶部 "目标" 文字
-	var lbl_t_title := _label("目标", 10, COL_TEXT_DIM)
-	lbl_t_title.position = Vector2(332, 8)
-	lbl_t_title.size = Vector2(32, 14)
-	lbl_t_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	panel.add_child(lbl_t_title)
-	# 金色外框
-	var bar_border_v := ColorRect.new()
-	bar_border_v.color = COL_GOLD
-	bar_border_v.position = Vector2(bar_x - 1, bar_y)
-	bar_border_v.size = Vector2(bar_w_v + 2, bar_h_v)
-	panel.add_child(bar_border_v)
-	# 黑色背景 (代表"还差")
-	money_target_bg = ColorRect.new()
-	money_target_bg.color = Color.BLACK
-	money_target_bg.position = Vector2(bar_x, bar_y + 1)
-	money_target_bg.size = Vector2(bar_w_v, money_target_max_h)
-	panel.add_child(money_target_bg)
-	# 黄色填充 (从底向上)
-	money_target_fill = ColorRect.new()
-	money_target_fill.color = COL_GOLD
-	money_target_fill.position = Vector2(bar_x, money_target_bottom_y)
-	money_target_fill.size = Vector2(bar_w_v, 0.0)
-	panel.add_child(money_target_fill)
-	# 底部 "¥120K" + 百分比
-	var lbl_t_value := _label("¥120K", 11, COL_GOLD)
-	lbl_t_value.position = Vector2(332, bar_y + bar_h_v + 4)
-	lbl_t_value.size = Vector2(32, 14)
-	lbl_t_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	panel.add_child(lbl_t_value)
-	lbl_money_progress = _label("0%", 12, COL_TEXT)
-	lbl_money_progress.position = Vector2(332, bar_y + bar_h_v + 20)
-	lbl_money_progress.size = Vector2(32, 14)
-	lbl_money_progress.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	panel.add_child(lbl_money_progress)
 
 
 func _build_emotion_bar() -> void:
@@ -679,6 +673,156 @@ func _on_shop_entered(_d: int) -> void:
 	_refresh_shop()
 
 
+# 突发事件触发: 弹出消息框 + 日志区追加金色 [突发事件] xxx
+# ev: Event 实例 (来自 EventDatabase); null = 当前事件已失效, 仅做 UI 复位
+func _on_event_triggered(ev) -> void:
+	if ev == null:
+		_refresh_event_button()
+		_refresh_state()
+		return
+	_append_log("[突发事件] %s — %s" % [ev.name, ev.desc])
+	_show_event_popup(ev)
+	_refresh_state()
+
+
+# 弹出事件提示框 (一次性 AcceptDialog, 玩家点确认后销毁)
+func _show_event_popup(ev) -> void:
+	var dlg := AcceptDialog.new()
+	var tag: String
+	var col: Color
+	match ev.category_str():
+		"good":
+			tag = "利好"
+			col = COL_UP
+		"bad":
+			tag = "利空"
+			col = COL_DOWN
+		_:
+			tag = "中性"
+			col = COL_GOLD
+	dlg.title = "突发事件 · %s" % tag
+	dlg.dialog_text = "【%s】\n\n%s\n\n效果: %s" % [ev.name, ev.desc, ev.effect_desc]
+	dlg.ok_button_text = "知道了"
+	dlg.unresizable = true
+	dlg.add_theme_color_override("title_color", col)
+	add_child(dlg)
+	dlg.popup_centered(Vector2i(420, 200))
+	dlg.confirmed.connect(func(): dlg.queue_free())
+	dlg.canceled.connect(func(): dlg.queue_free())
+
+
+# 顶栏"今日事件"按钮: 利好红 / 利空绿 / 中性金 / 空灰 (A 股配色)
+func _refresh_event_button() -> void:
+	if btn_event == null: return
+	var ev = Game.current_event
+	if ev == null:
+		btn_event.text = "今日事件 —"
+		btn_event.add_theme_color_override("font_color", COL_TEXT_DIM)
+		return
+	btn_event.text = "今日事件 · %s" % ev.name
+	var col: Color = COL_GOLD
+	match ev.category_str():
+		"good": col = COL_UP
+		"bad":  col = COL_DOWN
+	btn_event.add_theme_color_override("font_color", col)
+
+
+# 突发事件按钮下拉信息栏 (悬停显示)
+# 结构: PanelContainer + MarginContainer + VBox(标题/描述/效果), 顶层 z_index=100
+# mouse_filter = IGNORE → tip 不阻挡其他鼠标事件, 也避免按钮 hover 状态被打断
+func _build_event_tip() -> void:
+	event_tip_panel = PanelContainer.new()
+	event_tip_panel.add_theme_stylebox_override("panel", _panel_stylebox(COL_GOLD))
+	event_tip_panel.visible = false
+	event_tip_panel.z_index = 100
+	event_tip_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	event_tip_panel.top_level = true
+	add_child(event_tip_panel)
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	event_tip_panel.add_child(margin)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 6)
+	margin.add_child(vb)
+	lbl_event_tip_title = _label("", 14, COL_GOLD)
+	vb.add_child(lbl_event_tip_title)
+	lbl_event_tip_desc = _label("", 11, COL_TEXT_DIM)
+	lbl_event_tip_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl_event_tip_desc.custom_minimum_size = Vector2(280, 0)
+	vb.add_child(lbl_event_tip_desc)
+	lbl_event_tip_effect = _label("", 12, COL_GOLD)
+	lbl_event_tip_effect.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl_event_tip_effect.custom_minimum_size = Vector2(280, 0)
+	vb.add_child(lbl_event_tip_effect)
+
+
+# 鼠标进入"今日事件"按钮: 填充内容 + 定位到按钮正下方 4px
+func _on_event_btn_hover() -> void:
+	if event_tip_panel == null or btn_event == null:
+		return
+	var ev = Game.current_event
+	var border_col: Color = COL_TEXT_DIM
+	if ev == null:
+		lbl_event_tip_title.text = "今日事件"
+		lbl_event_tip_title.add_theme_color_override("font_color", COL_TEXT_DIM)
+		lbl_event_tip_desc.text = "本时段暂无突发事件。事件会在每日第 1 / 第 5 回合刷新。"
+		lbl_event_tip_effect.text = ""
+	else:
+		var col: Color = COL_GOLD
+		var tag: String = "中性"
+		match ev.category_str():
+			"good":
+				col = COL_UP
+				tag = "利好"
+			"bad":
+				col = COL_DOWN
+				tag = "利空"
+		border_col = col
+		lbl_event_tip_title.text = "[%s] %s" % [tag, ev.name]
+		lbl_event_tip_title.add_theme_color_override("font_color", col)
+		lbl_event_tip_desc.text = ev.desc
+		lbl_event_tip_effect.text = "效果: %s" % ev.effect_desc
+	event_tip_panel.add_theme_stylebox_override("panel", _panel_stylebox(border_col))
+	event_tip_panel.position = btn_event.global_position + Vector2(0, btn_event.size.y + 4)
+	event_tip_panel.visible = true
+
+
+func _on_event_btn_unhover() -> void:
+	if event_tip_panel != null:
+		event_tip_panel.visible = false
+
+
+# 背景情绪渐变: bull=50 → COL_BG; bull→100 线性插到 COL_BG_BULL_MAX (红);
+# bull→0 线性插到 COL_BG_BEAR_MAX (绿). 输出供 ColorRect 直接使用.
+func _emotion_bg_color(bull_v: int) -> Color:
+	var t: float = (float(bull_v) - 50.0) / 50.0   # -1..1
+	if t >= 0.0:
+		return COL_BG.lerp(COL_BG_BULL_MAX, clamp(t, 0.0, 1.0))
+	return COL_BG.lerp(COL_BG_BEAR_MAX, clamp(-t, 0.0, 1.0))
+
+
+# BGM 接入: 循环播 res://assets/bgm/Measured Inflection.mp3
+# 注: Godot 编辑器需先打开一次生成 .import, 否则 load() 失败
+func _start_bgm() -> void:
+	if bgm_player != null and bgm_player.playing:
+		return
+	var stream: Variant = load("res://assets/bgm/Measured Inflection.mp3")
+	if stream == null:
+		push_warning("BGM 加载失败: assets/bgm/Measured Inflection.mp3 (需在 Godot 编辑器先生成 .import)")
+		return
+	if stream is AudioStreamMP3:
+		(stream as AudioStreamMP3).loop = true
+	bgm_player = AudioStreamPlayer.new()
+	bgm_player.stream = stream
+	bgm_player.volume_db = -6.0
+	bgm_player.autoplay = false
+	add_child(bgm_player)
+	bgm_player.play()
+
+
 func _on_phase_changed(p: int) -> void:
 	# 离开 SHOP 阶段时收起 overlay
 	if p != Game.Phase.SHOP and shop_overlay != null:
@@ -880,13 +1024,6 @@ func _refresh_state() -> void:
 	lbl_pnl_pct.add_theme_color_override("font_color", pnl_color)
 
 	lbl_total_assets.text = "¥%s" % _fmt_money(Game.get_total_assets())
-	var to_target: float = Game.VICTORY_TARGET - Game.get_total_assets()
-	if to_target <= 0:
-		lbl_target.text = "目标 ¥%s ✓ 已达成" % _fmt_money(Game.VICTORY_TARGET)
-		lbl_target.add_theme_color_override("font_color", COL_UP)
-	else:
-		lbl_target.text = "目标 ¥%s · 差 ¥%s" % [_fmt_money(Game.VICTORY_TARGET), _fmt_money(to_target)]
-		lbl_target.add_theme_color_override("font_color", COL_TEXT_DIM)
 
 	# 顶栏情绪
 	lbl_bull.text = "上涨 %d" % Game.bull
@@ -906,26 +1043,27 @@ func _refresh_state() -> void:
 	lbl_draw_pile.text = "%d" % Game.draw_pile.size()
 	lbl_discard_pile.text = "%d" % Game.discard_pile.size()
 
-	# 现金 marker 在四色柱上的位置 (现金区间 0..START_CASH*2 截断)
-	var bar_top_y: float = 20.0
-	var bar_height: float = 432.0
-	var ratio: float = clamp(Game.cash / (Game.START_CASH * 2.0), 0.0, 1.0)
-	money_bar_marker.position.y = bar_top_y + (1.0 - ratio) * bar_height - 1.0
+	# 总资金条 (左侧): 蓝段 = 现金, 黄段 = 持仓市值 (叠在蓝段上方)
+	var cash_ratio: float = clamp(Game.cash / money_bar_full_value, 0.0, 1.0)
+	var hold_ratio: float = clamp(Game.get_holding_value() / money_bar_full_value, 0.0, 1.0)
+	# 蓝段 + 黄段总高不超过整柱 (避免溢出)
+	if cash_ratio + hold_ratio > 1.0:
+		hold_ratio = 1.0 - cash_ratio
+	var cash_h: float = money_bar_bg_h * cash_ratio
+	var hold_h: float = money_bar_bg_h * hold_ratio
+	if money_bar_cash != null:
+		money_bar_cash.size.y = cash_h
+		money_bar_cash.position.y = money_bar_bg_y + money_bar_bg_h - cash_h
+	if money_bar_holding != null:
+		money_bar_holding.size.y = hold_h
+		money_bar_holding.position.y = money_bar_bg_y + money_bar_bg_h - cash_h - hold_h
 
-	# 目标进度条 (竖向 ColorRect: 黄色 fill 高度 = 总资产/目标 × 最大高, 从底部向上长)
-	var prog: float = Game.get_total_assets() / Game.VICTORY_TARGET * 100.0
-	var ratio_p: float = clamp(prog / 100.0, 0.0, 1.0)
-	var fill_h: float = money_target_max_h * ratio_p
-	money_target_fill.size.y = fill_h
-	money_target_fill.position.y = money_target_bottom_y - fill_h
-	lbl_money_progress.text = "%.0f%%" % clamp(prog, 0.0, 999.0)
-	lbl_target.text = "目标 ¥%s  ·  %.0f%%" % [_fmt_money(Game.VICTORY_TARGET), clamp(prog, 0.0, 999.0)]
-	if prog >= 100.0:
-		lbl_target.add_theme_color_override("font_color", COL_UP)
-		lbl_money_progress.add_theme_color_override("font_color", COL_UP)
-	else:
-		lbl_target.add_theme_color_override("font_color", COL_TEXT_DIM)
-		lbl_money_progress.add_theme_color_override("font_color", COL_TEXT)
+	# 顶栏"今日事件"按钮: 常驻同步当前事件 (空=灰, 利好=绿, 利空=红, ban=金)
+	_refresh_event_button()
+
+	# 背景颜色: 随上涨情绪渐变 (bull>50 → 偏红, bull<50 → 偏绿)
+	if bg_rect != null:
+		bg_rect.color = _emotion_bg_color(Game.bull)
 
 	# 结束回合按钮
 	btn_end_turn.disabled = Game.is_level_over or Game.phase != Game.Phase.PLAY
@@ -937,7 +1075,10 @@ func _refresh_state() -> void:
 			var btn := children[i] as Button
 			if btn == null: continue
 			var c: Card = Game.hand[i]
-			btn.disabled = (Game.action_points < c.cost) or (Game.phase != Game.Phase.PLAY) or Game.is_level_over
+			btn.disabled = (Game.action_points < c.cost) \
+				or (Game.phase != Game.Phase.PLAY) \
+				or Game.is_level_over \
+				or Game.banned_effect_ids.has(c.effect_id)
 
 	if k_chart: k_chart.queue_redraw()
 
@@ -996,7 +1137,7 @@ func _make_card_button(card: Card, index: int) -> Button:
 	ld.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(ld)
 	# 出牌
-	if Game.action_points < card.cost or Game.phase != Game.Phase.PLAY or Game.is_level_over:
+	if Game.action_points < card.cost or Game.phase != Game.Phase.PLAY or Game.is_level_over or Game.banned_effect_ids.has(card.effect_id):
 		b.disabled = true
 	b.pressed.connect(func(): Game.play_card(index))
 	return b
@@ -1069,6 +1210,8 @@ func _append_log(msg: String) -> void:
 		color = COL_UP
 	elif msg.begins_with("[失败]"):
 		color = COL_DOWN
+	elif msg.begins_with("[突发事件]"):
+		color = COL_GOLD
 	log_text.push_color(color)
 	log_text.add_text(msg)
 	log_text.pop()
@@ -1337,6 +1480,16 @@ func _panel_stylebox(border: Color = COL_BORDER) -> StyleBoxFlat:
 	sb.corner_radius_top_right = 4
 	sb.corner_radius_bottom_left = 4
 	sb.corner_radius_bottom_right = 4
+	return sb
+
+
+# 半透明版面板背景: 复用 _panel_stylebox 形状, 仅把背景 alpha 降到指定值
+# 用于价格图表 / 右侧信息栏, 让情绪渐变背景透过来
+func _panel_stylebox_translucent(alpha: float = 0.55, border: Color = COL_BORDER) -> StyleBoxFlat:
+	var sb := _panel_stylebox(border)
+	var c := sb.bg_color
+	c.a = alpha
+	sb.bg_color = c
 	return sb
 
 

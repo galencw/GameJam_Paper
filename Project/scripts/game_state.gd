@@ -4,6 +4,8 @@ extends Node
 
 const Card = preload("res://scripts/card.gd")
 const CardDatabase = preload("res://scripts/card_database.gd")
+const Event = preload("res://scripts/event.gd")
+const EventDatabase = preload("res://scripts/event_database.gd")
 
 # ===== 关卡/天/回合 (新手关) =====
 const DAYS_PER_LEVEL: int = 5
@@ -14,8 +16,8 @@ const START_CASH: float = 100000.0
 const VICTORY_TARGET: float = 120000.0          # 第一关
 const INITIAL_PRICE: float = 100.0
 const SETTLE_DISCOUNT: float = 0.5              # 周五未卖筹码强制折价
-const FIRST_TURN_DRAW: int = 6                  # 第一回合摸 6 张
-const TURN_DRAW: int = 2                        # 此后每回合摸 2 张
+const FIRST_TURN_DRAW: int = 6                  # 第一回合摸 6 张 (保留常量给旧测试)
+const TURN_DRAW: int = 6                        # 每回合统一抽 6 张 (策划改版)
 const HAND_LIMIT: int = 10
 const ACTION_POINTS_PER_TURN: int = 3
 
@@ -24,9 +26,13 @@ const INITIAL_BULL: int = 50                    # 初始上涨情绪
 const EMOTION_TOTAL: int = 100                  # 上涨 + 下跌 = 100
 
 # ===== 自然波动 (clamp 范围 / σ 可调) =====
-const NATURAL_DRIFT_CLAMP: float = 0.03         # ±3%
+const NATURAL_DRIFT_CLAMP: float = 0.10         # ±10% (策划 4.3)
 const NATURAL_VOLATILITY_SIGMA_DEFAULT: float = 0.012   # σ 暂取 1.2%, 待数值组确认
 var natural_volatility_sigma: float = NATURAL_VOLATILITY_SIGMA_DEFAULT
+
+# ===== 突发事件 =====
+const EVENT_TRIGGER_TURNS: Array = [1, 5]       # 每天开盘后触发的回合编号
+# 事件池 / 数据定义已迁出至 scripts/event.gd + scripts/event_database.gd
 
 # ===== 阶段 =====
 enum Phase {
@@ -63,6 +69,7 @@ signal candle_committed(turn_global: int)        # 回合 K 入库
 signal intraday_updated                          # 分时新点
 signal level_finished(victory: bool, final_assets: float)
 signal log_message(msg: String)
+signal event_triggered(event)                    # 突发事件触发: Event 实例 (或 null 表示失效)
 
 # ===== 局内状态 =====
 var cash: float = START_CASH
@@ -79,6 +86,12 @@ var hand: Array = []
 var draw_pile: Array = []
 var discard_pile: Array = []                    # 等待区 (类似杀戮尖塔), 抽牌堆空时洗回
 var is_level_over: bool = false
+var current_event: Event = null                 # 当前生效的突发事件 (null = 无)
+var banned_effect_ids: Dictionary = {}          # {effect_id: true} ban 列表 (持续到下次事件刷新)
+var event_modifiers: Dictionary = {}            # 当前活跃事件 modifier (倍率/限幅/标记)
+var event_modifier_dur: int = -1                # >0: 剩余作用回合数; -1: 无限直到下次事件或日切
+var triggered_event_ids_this_level: Dictionary = {} # 本关已触发事件 id (一周内同事件不再触发)
+var skills_played_this_turn: int = 0            # 本回合已使用的技能牌数 (重点监控用)
 
 # ===== K线 =====
 var candles: Array = []                         # 已结算回合 K, 每根 {turn_global, day, turn_in_day, open, high, low, close}
@@ -114,6 +127,12 @@ func new_level() -> void:
 	cur_high = price
 	cur_low = price
 	is_level_over = false
+	current_event = null
+	banned_effect_ids = {}
+	event_modifiers = {}
+	event_modifier_dur = -1
+	triggered_event_ids_this_level = {}
+	skills_played_this_turn = 0
 	phase = Phase.PLAY
 	shop_offers.clear()
 	shop_delete_count = 0
@@ -137,6 +156,25 @@ func play_card(index: int) -> bool:
 	if action_points < c.cost:
 		_log("行动力不足，无法打出「%s」" % c.name)
 		return false
+	if banned_effect_ids.has(c.effect_id):
+		_log("「%s」被突发事件禁用，无法打出" % c.name)
+		return false
+	# 重点监控: 本回合技能牌使用上限
+	if c.is_skill() and event_modifiers.has("skill_cap_per_turn"):
+		var cap_n: int = int(event_modifiers["skill_cap_per_turn"])
+		if skills_played_this_turn >= cap_n:
+			_log("[重点监控] 本回合已使用 %d 张技能牌, 达到上限" % cap_n)
+			return false
+	# 资源前置检查 (买入要现金, 卖出要持仓; 不满足直接拒绝, 不扣 AP / 不进弃牌堆)
+	if c.effect_id == "buy_basic" or c.effect_id == "buy_plus":
+		var need_cash: float = 100.0 * price
+		if cash < need_cash:
+			_log("现金不足 ¥%.2f, 无法打出「%s」" % [need_cash, c.name])
+			return false
+	elif c.effect_id == "sell_basic" or c.effect_id == "sell_plus":
+		if shares < 100:
+			_log("持仓不足 100 股, 无法打出「%s」" % c.name)
+			return false
 	action_points -= c.cost
 	hand.remove_at(index)
 	# 记录出牌前价位
@@ -166,6 +204,8 @@ func play_card(index: int) -> bool:
 	})
 	discard_pile.append(c)
 	_log("打出「%s」: %s" % [c.name, c.description])
+	if c.is_skill():
+		skills_played_this_turn += 1
 	emit_signal("intraday_updated")
 	emit_signal("hand_changed")
 	emit_signal("state_changed")
@@ -188,38 +228,49 @@ func end_turn() -> void:
 func _dispatch_effect(effect_id: String) -> void:
 	match effect_id:
 		"buy_basic":
-			# 消耗总资金的 10% 买入筹码, 不影响股价
-			# "总资金" 在策划描述里没明确是 cash 还是 cash+持仓市值
-			# 根据策划"金钱也是生命值"语境, 这里取手头现金的 10%
-			var spend: float = cash * 0.10
-			_buy_with_cash(spend, false)
+			# 固定买 100 股, 股价 +1% × 涨市 trade_mul
+			_buy_shares(100)
+			apply_price_change(0.01 * _trade_price_mul(), true)
 		"sell_basic":
-			# 卖出当前持仓的 10%, 不影响股价
-			var n: int = int(floor(float(shares) * 0.10))
-			_sell_shares(n, false)
+			# 固定卖 100 股, 股价 -1% × 涨市 trade_mul
+			_sell_shares(100, false)
+			apply_price_change(-0.01 * _trade_price_mul(), true)
 		"insider_basic":
-			apply_price_change(0.03)
+			# 技能牌 → 走情绪倍率 + 火线预期 card_price_up_mul
+			apply_price_change(0.03 * _card_price_dir_mul(1.0))
 		"hype_basic":
 			apply_emotion_delta_bull(5)
 		# ---- 升级版 ----
 		"buy_plus":
-			var spend2: float = cash * 0.30
-			_buy_with_cash(spend2, true)   # 同时拉升 +3%
+			_buy_shares(100)
+			apply_price_change(0.03 * _trade_price_mul(), true)
 		"sell_plus":
-			var n2: int = int(floor(float(shares) * 0.30))
-			_sell_shares(n2, true)         # 同时压低 -3%
+			_sell_shares(100, false)
+			apply_price_change(-0.03 * _trade_price_mul(), true)
 		"insider_plus":
-			apply_price_change(0.05)
+			apply_price_change(0.05 * _card_price_dir_mul(1.0))
 		"hype_plus":
 			apply_emotion_delta_bull(10)
 		# ---- 商店占位卡 ----
 		"crash_basic":
-			apply_price_change(-0.03)
+			apply_price_change(-0.03 * _card_price_dir_mul(-1.0))
 		"panic_basic":
 			apply_emotion_delta_bull(-5)
-			apply_price_change(-0.02)
+			apply_price_change(-0.02 * _card_price_dir_mul(-1.0))
 		_:
 			push_warning("Unknown effect_id: %s" % effect_id)
+
+
+# 事件 modifier 查询助手
+func _trade_price_mul() -> float:
+	return float(event_modifiers.get("card_trade_price_mul", 1.0))
+
+
+# 技能牌的方向放大倍率: rate>0 → card_price_up_mul; rate<0 → card_price_down_mul
+func _card_price_dir_mul(sign_rate: float) -> float:
+	if sign_rate >= 0.0:
+		return float(event_modifiers.get("card_price_up_mul", 1.0))
+	return float(event_modifiers.get("card_price_down_mul", 1.0))
 
 
 # ===========================================================
@@ -232,35 +283,49 @@ func apply_price_change(rate: float, ignore_emotion_modifier: bool = false) -> v
 		eff_rate = rate * _emotion_modifier_for_price(rate)
 	var old_price: float = price
 	price = max(1.0, price * (1.0 + eff_rate))
+	# 涨跌停: 限制相对本回合开盘 cur_open 的累计涨/跌幅 (事件 modifier)
+	if event_modifiers.has("cap_drift_up"):
+		var cap_up: float = float(event_modifiers["cap_drift_up"])
+		var ceil_price: float = cur_open * (1.0 + cap_up)
+		if price > ceil_price:
+			price = ceil_price
+	if event_modifiers.has("cap_drift_down"):
+		var cap_dn: float = float(event_modifiers["cap_drift_down"])
+		var floor_price: float = cur_open * (1.0 - cap_dn)
+		if price < floor_price:
+			price = floor_price
 	_track_price()
 	_log("  股价 %+.1f%% (¥%.2f → ¥%.2f)" % [eff_rate * 100.0, old_price, price])
 
 
-# 改变上涨情绪 (下跌情绪自动补足)
+# 改变上涨情绪 (下跌情绪自动补足); 应用事件 floor/ceiling 锚定
 func apply_emotion_delta_bull(delta: int) -> void:
 	var old: int = bull
-	bull = clamp(bull + delta, 0, EMOTION_TOTAL)
+	var new_bull: int = bull + delta
+	# 事件锚定 (信仰充值 / 信仰崩塌)
+	var floor_v: int = int(event_modifiers.get("emotion_floor", 0))
+	var ceil_v: int = int(event_modifiers.get("emotion_ceiling", EMOTION_TOTAL))
+	new_bull = clamp(new_bull, floor_v, ceil_v)
+	new_bull = clamp(new_bull, 0, EMOTION_TOTAL)
+	bull = new_bull
 	bear = EMOTION_TOTAL - bull
 	_log("  情绪 上涨%+d → %d/%d" % [delta, bull, bear])
 	if old == bull:
 		return
 
 
-func _buy_with_cash(spend: float, affect_price: bool) -> void:
-	if spend <= 0.0 or price <= 0.0:
-		return
-	if spend > cash:
-		spend = cash
-	var n: int = int(floor(spend / price))
-	if n <= 0:
-		_log("  资金过少, 无法成交 1 股")
+# 固定股数买入 (买入卡固定 100 股); 不附带额外价格联动, 调用方自己 apply_price_change
+func _buy_shares(n: int) -> void:
+	if n <= 0 or price <= 0.0:
 		return
 	var cost: float = float(n) * price
+	if cost > cash:
+		# 理论上 play_card 已经前置检查, 这里只是兜底
+		_log("  资金不足, 无法买入 %d 股" % n)
+		return
 	cash -= cost
 	shares += n
 	_log("  买入 %d 股 @ ¥%.2f, 花费 ¥%s" % [n, price, _fmt_money(cost)])
-	if affect_price:
-		apply_price_change(0.03)
 
 
 func _sell_shares(n: int, affect_price: bool) -> void:
@@ -296,8 +361,28 @@ func draw_cards(n: int) -> int:
 	return got
 
 
-# 第一回合保底: 至少 1 买 + 1 卖 + 1 技能 (策划 7.2.8)
-# 在普通抽牌之后调用, 缺什么就从 draw_pile 里取一张顶上去
+# 首回合保底: 先种 1 买 + 1 卖 + 1 技能 (策划 7.2.8), 再由 _start_turn 补到 6 张
+# 避免老版"先抽 6 再补 1"导致首回合 7 张的 bug
+func _seed_first_turn_floor() -> void:
+	_seed_one_of_kind(Card.Kind.BUY)
+	_seed_one_of_kind(Card.Kind.SELL)
+	_seed_one_of_kind(Card.Kind.SKILL)
+
+
+func _seed_one_of_kind(kind: int) -> void:
+	if hand.size() >= HAND_LIMIT: return
+	# 已有该类型就跳过
+	for c in hand:
+		if c.kind == kind:
+			return
+	for i in range(draw_pile.size() - 1, -1, -1):
+		if draw_pile[i].kind == kind:
+			hand.append(draw_pile[i])
+			draw_pile.remove_at(i)
+			return
+
+
+# (旧 API 保留, 仍可被外部 / 测试调用; 内部首回合流程不再使用)
 func _ensure_first_turn_floor() -> void:
 	var have_buy: bool = false
 	var have_sell: bool = false
@@ -329,7 +414,16 @@ func _start_day() -> void:
 	turn_in_day = 0
 	day_open_price = price
 	day_open_assets = get_total_assets()
-	_log("==== 第 %d / %d 天 开盘 ¥%.2f ====" % [day, DAYS_PER_LEVEL, day_open_price])
+	# 每天重置市场情绪到中性
+	bull = INITIAL_BULL
+	bear = EMOTION_TOTAL - INITIAL_BULL
+	# 清掉上一天残留的事件 ban / modifier (triggered_event_ids 保留, 整关一周内不重复)
+	current_event = null
+	banned_effect_ids = {}
+	event_modifiers = {}
+	event_modifier_dur = -1
+	_log("==== 第 %d / %d 天 开盘 ¥%.2f (情绪重置 %d/%d) ====" % [
+		day, DAYS_PER_LEVEL, day_open_price, bull, bear])
 	emit_signal("day_started", day)
 	_start_turn()
 
@@ -338,6 +432,7 @@ func _start_turn() -> void:
 	turn_in_day += 1
 	turn_global += 1
 	action_points = ACTION_POINTS_PER_TURN
+	skills_played_this_turn = 0
 	# 本回合 OHLC 初始化
 	cur_open = price
 	cur_high = price
@@ -349,16 +444,34 @@ func _start_turn() -> void:
 	# UI 仍认为是 SETTLE 阶段而把所有手牌按钮 disable
 	phase = Phase.PLAY
 	# 抽牌 (会发 hand_changed)
-	# 每天第 1 回合摸 6 张 (首日及每天开始时的"起始手牌"); 其它回合摸 2 张.
-	# 配合 leave_shop_to_next_day() / new_level() 的"手牌洗回"逻辑, 每天独立发起始手牌.
-	if turn_in_day == 1:
-		draw_cards(FIRST_TURN_DRAW)
-		if turn_global == 1:
-			_ensure_first_turn_floor()
-			# 保底可能改了手牌, 再发一次 hand_changed
-			emit_signal("hand_changed")
+	# 策划改版: 每回合统一抽 6 张. 首回合 (turn_global == 1) 额外做"1买+1卖+1技能"保底,
+	# 实现方式为"先种 1+1+1 → 再补到 6 张", 避免老版"先抽 6 再补 1"导致 7 张的 bug.
+	if turn_global == 1:
+		_seed_first_turn_floor()
+		var need: int = TURN_DRAW - hand.size()
+		if need > 0:
+			draw_cards(need)
+		emit_signal("hand_changed")
 	else:
 		draw_cards(TURN_DRAW)
+	# 突发事件: 每天的 EVENT_TRIGGER_TURNS 回合开盘抽牌后刷新一次
+	if EVENT_TRIGGER_TURNS.has(turn_in_day):
+		_trigger_random_event()
+	# 账户审查: 每回合开始随机冻结 N 张手牌进弃牌堆
+	if event_modifiers.has("freeze_per_turn") and not hand.is_empty():
+		var fz: int = int(event_modifiers["freeze_per_turn"])
+		fz = min(fz, hand.size())
+		for i in range(fz):
+			if hand.is_empty(): break
+			var idx: int = randi() % hand.size()
+			var fc: Card = hand[idx]
+			hand.remove_at(idx)
+			discard_pile.append(fc)
+			_log("  [账户审查] 「%s」被冻结进弃牌堆" % fc.name)
+		emit_signal("hand_changed")
+	# 混乱之日: 每回合 50% AP+1 / 50% AP-1 (含事件触发回合)
+	if event_modifiers.get("ap_chaos", false):
+		_apply_ap_chaos()
 	_log("--- 第 %d 天 第 %d 回合 [行动阶段] ---" % [day, turn_in_day])
 	emit_signal("turn_started", day, turn_in_day)
 	emit_signal("phase_changed", phase)
@@ -369,12 +482,25 @@ func _start_turn() -> void:
 
 
 func _settle_turn() -> void:
-	# 1. 自然波动
+	# 0. 未打出的手牌按 hand[0..n-1] 顺序入弃牌堆 (策划: 先抽到的先进弃牌堆)
+	if hand.size() > 0:
+		for c in hand:
+			discard_pile.append(c)
+		_log("  弃 %d 张未打出手牌进弃牌堆" % hand.size())
+		hand.clear()
+		emit_signal("hand_changed")
+	# 1. 自然波动 (μ 由情绪驱动, 不再叠加情绪倍率)
 	var drift: float = _roll_natural_drift()
+	# 神秘资金: 30% 概率叠加 ±5% 随机波动
+	if event_modifiers.get("mystery_active", false):
+		if randf() < 0.30:
+			var extra: float = 0.05 if randf() < 0.5 else -0.05
+			drift += extra
+			drift = clamp(drift, -NATURAL_DRIFT_CLAMP - 0.05, NATURAL_DRIFT_CLAMP + 0.05)
+			_log("  [神秘资金] 额外波动 %+.0f%%" % (extra * 100.0))
 	var old_price: float = price
-	price = max(1.0, price * (1.0 + drift))
-	_track_price()
-	_log("  自然波动 %+.2f%% (¥%.2f → ¥%.2f)" % [drift * 100.0, old_price, price])
+	apply_price_change(drift, true)
+	_log("  回合末自然波动 %+.2f%% → ¥%.2f" % [drift * 100.0, price])
 	# 1.5 自然波动作为分时 K 最后一根
 	intraday_candles.append({
 		"open":  old_price,
@@ -397,6 +523,17 @@ func _settle_turn() -> void:
 	emit_signal("candle_committed", turn_global)
 	# 3. 触发回合结束
 	emit_signal("turn_ended", day, turn_in_day)
+	# 3.5 短期事件 modifier 倒计时 (超预期财报 / 财报逆袭等 dur_turns)
+	if event_modifier_dur > 0:
+		event_modifier_dur -= 1
+		if event_modifier_dur == 0:
+			if current_event != null:
+				_log("  [事件失效] %s 持续效果到期" % current_event.name)
+			current_event = null
+			banned_effect_ids = {}
+			event_modifiers = {}
+			event_modifier_dur = -1
+			emit_signal("event_triggered", null)
 	# 4. 推进
 	if turn_in_day >= TURNS_PER_DAY:
 		_end_day()
@@ -483,10 +620,86 @@ func _settle_level() -> void:
 
 
 # ===========================================================
+# 突发事件
+# ===========================================================
+func _trigger_random_event() -> void:
+	var pool: Array = EventDatabase.build_event_pool()
+	if pool.is_empty():
+		return
+	# 清掉上次事件的所有持续效果 (ban / modifier / 时长) — 新事件 = 旧事件全部失效
+	banned_effect_ids = {}
+	event_modifiers = {}
+	event_modifier_dur = -1
+	# 一周内同样事件不能触发超过一次: 过滤未触发的 id
+	var candidates: Array = []
+	for e in pool:
+		if not triggered_event_ids_this_level.has(e.id):
+			candidates.append(e)
+	if candidates.is_empty():
+		# 整池都触发过 (后期兜底), 退回完整池等概率抽
+		candidates = pool
+	var ev: Event = candidates[randi() % candidates.size()]
+	current_event = ev
+	triggered_event_ids_this_level[ev.id] = true
+	_log("[突发事件] %s — %s" % [ev.name, ev.desc])
+	_apply_event_effects(ev)
+	emit_signal("event_triggered", ev)
+	emit_signal("state_changed")
+
+
+# 把 Event 实例字段落到 state.
+# 支持组合: 一条事件可同时含 一次性效果 + 持续修饰 + ban + ap_chaos
+func _apply_event_effects(ev: Event) -> void:
+	# 1. 持续修饰 (modifiers) — 先写入, 后面的情绪 / 锚定都依赖它
+	for k in ev.modifiers.keys():
+		event_modifiers[k] = ev.modifiers[k]
+	# 2. 短期持续回合 (>0 = 短期, -1 = 持续到下次事件 / 日切)
+	event_modifier_dur = ev.dur_turns
+	# 3. 情绪锚定
+	if ev.emotion_floor >= 0:
+		event_modifiers["emotion_floor"] = ev.emotion_floor
+		if bull < ev.emotion_floor:
+			apply_emotion_delta_bull(ev.emotion_floor - bull)
+	if ev.emotion_ceiling >= 0:
+		event_modifiers["emotion_ceiling"] = ev.emotion_ceiling
+		if bull > ev.emotion_ceiling:
+			apply_emotion_delta_bull(ev.emotion_ceiling - bull)
+	# 4. 一次性情绪
+	if ev.delta_bull != 0:
+		apply_emotion_delta_bull(ev.delta_bull)
+	# 5. 当回合情绪随机 ±N (意外事件)
+	if ev.delta_bull_random > 0:
+		apply_emotion_delta_bull(randi_range(-ev.delta_bull_random, ev.delta_bull_random))
+	# 6. 一次性股价冲击
+	if ev.price_rate != 0.0:
+		apply_price_change(ev.price_rate, true)
+	# 7. ban
+	for eid in ev.banned_effect_ids:
+		banned_effect_ids[String(eid)] = true
+	# 8. 混乱之日: 写入持续 modifier; 实际 AP 调整由 _start_turn 末尾统一执行
+	#    (包括事件触发当回合本身)
+	if ev.ap_chaos:
+		event_modifiers["ap_chaos"] = true
+
+
+# 混乱之日: 当前 AP 上做一次 50% +1 / 50% -1 调整 (并 log)
+func _apply_ap_chaos() -> void:
+	if randf() < 0.5:
+		action_points = max(0, action_points - 1)
+		_log("  [混乱之日] 行动力 -1 → %d" % action_points)
+	else:
+		action_points += 1
+		_log("  [混乱之日] 行动力 +1 → %d" % action_points)
+
+
+# ===========================================================
 # 自然波动 / 情绪倍率
 # ===========================================================
 func _roll_natural_drift() -> float:
-	var mu: float = (float(bull) - 50.0) / 50.0 * NATURAL_DRIFT_CLAMP
+	# 市场失真: 情绪与价格脱钩, μ 不再受情绪驱动 (退化为零均值高斯游走)
+	var mu: float = 0.0
+	if not event_modifiers.get("decouple", false):
+		mu = (float(bull) - 50.0) / 50.0 * NATURAL_DRIFT_CLAMP
 	var x: float = _gaussian(mu, natural_volatility_sigma)
 	return clamp(x, -NATURAL_DRIFT_CLAMP, NATURAL_DRIFT_CLAMP)
 
@@ -503,19 +716,26 @@ func _gaussian(mean: float, sigma: float) -> float:
 # rate>0 → 买入方向取 "买入上涨倍率"
 # rate<0 → 卖出方向取 "卖出下跌倍率"
 func _emotion_modifier_for_price(rate: float) -> float:
+	# 市场失真: 情绪倍率完全脱钩 → 恒 1.0
+	if event_modifiers.get("decouple", false):
+		return 1.0
+	var base: float
 	if rate >= 0.0:
 		# buy direction
-		if bull <= 30: return 0.5
-		elif bull <= 50: return 0.8
-		elif bull <= 70: return 1.5
-		else: return 2.0
+		if bull <= 30: base = 0.5
+		elif bull <= 50: base = 0.8
+		elif bull <= 70: base = 1.5
+		else: base = 2.0
 	else:
 		# sell / 砸盘 direction; 看下跌情绪 (=100-bull)
 		var bear_v: int = EMOTION_TOTAL - bull
-		if bear_v <= 30: return 0.5
-		elif bear_v <= 50: return 0.8
-		elif bear_v <= 70: return 1.5
-		else: return 2.0
+		if bear_v <= 30: base = 0.5
+		elif bear_v <= 50: base = 0.8
+		elif bear_v <= 70: base = 1.5
+		else: base = 2.0
+	# 风险警示: 情绪对价格影响 ×0.5
+	var mul: float = float(event_modifiers.get("emotion_modifier_mul", 1.0))
+	return base * mul
 
 
 # ===========================================================

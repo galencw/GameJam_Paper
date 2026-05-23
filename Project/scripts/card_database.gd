@@ -6,15 +6,15 @@ extends RefCounted
 
 const Card = preload("res://scripts/card.gd")
 
-# 12 张初始牌组: 3 买入 + 3 卖出 + 3 内幕消息 + 3 大V吹票
+# 12 张初始牌组: 5 买入 + 5 卖出 + 1 大V吹票 + 1 内幕消息 (策划改版)
 static func build_starter_deck() -> Array:
 	var deck: Array = []
 	var defs: Array = [
 		# [id_prefix, 显示名, kind, cost, 描述, effect_id, 数量]
-		["buy",     "买入",       Card.Kind.BUY,   1, "消耗总资金 10% 买入筹码 (按当前股价), 不影响股价", "buy_basic",     3],
-		["sell",    "卖出",       Card.Kind.SELL,  1, "卖出当前持仓 10% 换回金钱 (按当前股价), 不影响股价", "sell_basic",    3],
-		["insider", "内幕消息",   Card.Kind.SKILL, 1, "直接拉升股价 +3%",                                 "insider_basic", 3],
-		["hype",    "大V吹票",    Card.Kind.SKILL, 1, "上涨情绪 +5",                                      "hype_basic",    3],
+		["buy",     "买入",       Card.Kind.BUY,   1, "买入 100 股 (按当前股价), 股价 +1%", "buy_basic",     5],
+		["sell",    "卖出",       Card.Kind.SELL,  1, "卖出 100 股 (按当前股价), 股价 -1%", "sell_basic",    5],
+		["hype",    "大V吹票",    Card.Kind.SKILL, 1, "上涨情绪 +5",                       "hype_basic",    1],
+		["insider", "内幕消息",   Card.Kind.SKILL, 1, "直接拉升股价 +3%",                  "insider_basic", 1],
 	]
 	for d in defs:
 		for i in range(d[6]):
@@ -27,10 +27,10 @@ static func make_by_effect(effect_id: String, unique_id: String) -> Card:
 	match effect_id:
 		"buy_basic":
 			return Card.new(unique_id, "买入", Card.Kind.BUY, 1,
-				"消耗总资金 10% 买入筹码 (按当前股价), 不影响股价", "buy_basic")
+				"买入 100 股 (按当前股价), 股价 +1%", "buy_basic")
 		"sell_basic":
 			return Card.new(unique_id, "卖出", Card.Kind.SELL, 1,
-				"卖出当前持仓 10% 换回金钱 (按当前股价), 不影响股价", "sell_basic")
+				"卖出 100 股 (按当前股价), 股价 -1%", "sell_basic")
 		"insider_basic":
 			return Card.new(unique_id, "内幕消息", Card.Kind.SKILL, 1,
 				"直接拉升股价 +3%", "insider_basic")
@@ -40,10 +40,10 @@ static func make_by_effect(effect_id: String, unique_id: String) -> Card:
 		# ---- 升级版 ----
 		"buy_plus":
 			return Card.new(unique_id, "买入+", Card.Kind.BUY, 1,
-				"消耗总资金 30% 买入筹码, 同时拉升股价 +3%", "buy_plus")
+				"买入 100 股, 股价 +3%", "buy_plus")
 		"sell_plus":
 			return Card.new(unique_id, "卖出+", Card.Kind.SELL, 1,
-				"卖出当前持仓 30% 换回金钱, 同时压低股价 -3%", "sell_plus")
+				"卖出 100 股, 股价 -3%", "sell_plus")
 		"insider_plus":
 			return Card.new(unique_id, "内幕消息+", Card.Kind.SKILL, 1,
 				"直接拉升股价 +5%", "insider_plus")
