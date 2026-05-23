@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://scenes/ui/top_bar.tscn" id="2_top_bar"]
@@ -11,7 +11,8 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/turn_panel.tscn" id="9_turn"]
 [ext_resource type="PackedScene" path="res://scenes/ui/player_panel.tscn" id="10_player"]
 [ext_resource type="PackedScene" path="res://scenes/ui/end_dialog.tscn" id="11_end"]
-[ext_resource type="PackedScene" path="res://scenes/ui/shop_overlay.tscn" id="12_shop"]
+[ext_resource type="PackedScene" path="res://scenes/ui/shop/shop_overlay.tscn" id="12_shop"]
+[ext_resource type="PackedScene" path="res://scenes/ui/deck_preview_popup.tscn" id="13_deck"]
 
 [node name="Main" type="Control"]
 anchors_preset = 15
@@ -97,3 +98,5 @@ offset_right = 896.0
 offset_bottom = 500.0
 
 [node name="ShopOverlay" parent="." instance=ExtResource("12_shop")]
+
+[node name="DeckPreviewPopup" parent="." instance=ExtResource("13_deck")]

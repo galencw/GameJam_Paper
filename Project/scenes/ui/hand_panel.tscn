@@ -47,6 +47,7 @@ horizontal_alignment = 1
 text = "抽牌堆"
 
 [node name="HandScroll" type="ScrollContainer" parent="."]
+clip_contents = false
 offset_left = 64.0
 offset_top = 8.0
 offset_right = 688.0

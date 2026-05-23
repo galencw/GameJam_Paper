@@ -12,7 +12,16 @@ const COL_DOWN: Color = Color("#ef476f")
 func _ready() -> void:
 	custom_minimum_size = Vector2(1280, 720)
 	Game.log_message.connect(_append_log)
+	$HandPanel.pile_clicked.connect(_on_pile_clicked)
 	Game.new_level()
+
+
+func _on_pile_clicked(pile_name: String) -> void:
+	var popup = $DeckPreviewPopup
+	if pile_name == "draw":
+		popup.show_deck("抽牌堆", Game.draw_pile.duplicate())
+	elif pile_name == "discard":
+		popup.show_deck("弃牌堆", Game.discard_pile.duplicate())
 
 
 func _unhandled_input(event: InputEvent) -> void:

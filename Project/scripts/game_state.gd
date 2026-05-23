@@ -183,6 +183,7 @@ func play_card(index: int) -> bool:
 	var price_before: float = price
 	var hi_before: float = cur_high
 	var lo_before: float = cur_low
+	var bull_before: int = bull
 	_dispatch_effect(c.effect_id)
 	# 出牌后这一段时间内 (effect 可能多次调用 apply_price_change), 价格区间 = (hi_before..cur_high, lo_before..cur_low)
 	# 计算这次出牌的 high/low: 取 dispatch 期间 cur_high/cur_low 的"增量"
@@ -203,6 +204,9 @@ func play_card(index: int) -> bool:
 		"high":  k_high,
 		"low":   k_low,
 		"kind":  "play",
+		"card_name": c.name,
+		"price_delta_pct": (price_after / price_before - 1.0) * 100.0 if price_before > 0.0 else 0.0,
+		"emotion_delta": bull - bull_before,
 	})
 	discard_pile.append(c)
 	_log("打出「%s」: %s" % [c.name, c.description])
@@ -389,9 +393,16 @@ func _settle_turn() -> void:
 		"high":  max(old_price, price),
 		"low":   min(old_price, price),
 		"kind":  "settle",
+		"card_name": "自然波动",
+		"price_delta_pct": drift * 100.0,
+		"emotion_delta": 0,
 	})
 	emit_signal("intraday_updated")
 	# 2. 提交一根回合 K
+	var turn_cards: Array = []
+	for ic in intraday_candles:
+		if ic["kind"] == "play":
+			turn_cards.append(String(ic["card_name"]))
 	candles.append({
 		"turn_global": turn_global,
 		"day": day,
@@ -400,6 +411,7 @@ func _settle_turn() -> void:
 		"high": cur_high,
 		"low":  cur_low,
 		"close": price,
+		"cards": turn_cards,
 	})
 	emit_signal("candle_committed", turn_global)
 	# 3. 触发回合结束

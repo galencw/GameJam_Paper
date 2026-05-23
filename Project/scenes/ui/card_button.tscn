@@ -19,17 +19,17 @@ theme_override_constants/separation = 3
 
 [node name="LblName" type="Label" parent="VBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 14
 horizontal_alignment = 1
 
 [node name="LblCost" type="Label" parent="VBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 10
+theme_override_font_sizes/font_size = 12
 horizontal_alignment = 1
 
 [node name="LblDesc" type="Label" parent="VBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 9
+theme_override_font_sizes/font_size = 11
 theme_override_colors/font_color = Color(0.604, 0.655, 0.753, 1)
 horizontal_alignment = 1
 autowrap_mode = 3

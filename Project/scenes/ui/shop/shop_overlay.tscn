@@ -1,6 +1,9 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=6 format=3]
 
-[ext_resource type="Script" path="res://scripts/views/shop_overlay.gd" id="1_script"]
+[ext_resource type="Script" path="res://scripts/views/shop/shop_overlay.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://scenes/ui/shop/shop_buy_panel.tscn" id="2_buy"]
+[ext_resource type="PackedScene" path="res://scenes/ui/shop/shop_upgrade_panel.tscn" id="3_upgrade"]
+[ext_resource type="PackedScene" path="res://scenes/ui/shop/shop_delete_panel.tscn" id="4_delete"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_shop"]
 bg_color = Color(0.106, 0.165, 0.255, 1)
@@ -89,92 +92,44 @@ text = "¥100,000"
 [node name="TopSep" type="HSeparator" parent="ShopPanel/Margin/RootVBox"]
 layout_mode = 2
 
-[node name="MidArea" type="HBoxContainer" parent="ShopPanel/Margin/RootVBox"]
+[node name="SummaryPanel" type="PanelContainer" parent="ShopPanel/Margin/RootVBox"]
 layout_mode = 2
-theme_override_constants/separation = 16
+custom_minimum_size = Vector2(0, 90)
 
-[node name="SummaryPanel" type="PanelContainer" parent="ShopPanel/Margin/RootVBox/MidArea"]
-layout_mode = 2
-custom_minimum_size = Vector2(560, 140)
-
-[node name="SumMargin" type="MarginContainer" parent="ShopPanel/Margin/RootVBox/MidArea/SummaryPanel"]
+[node name="SumMargin" type="MarginContainer" parent="ShopPanel/Margin/RootVBox/SummaryPanel"]
 layout_mode = 2
 theme_override_constants/margin_left = 12
 theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 12
 theme_override_constants/margin_bottom = 10
 
-[node name="SumVBox" type="VBoxContainer" parent="ShopPanel/Margin/RootVBox/MidArea/SummaryPanel/SumMargin"]
+[node name="SumVBox" type="VBoxContainer" parent="ShopPanel/Margin/RootVBox/SummaryPanel/SumMargin"]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="LblSumTitle" type="Label" parent="ShopPanel/Margin/RootVBox/MidArea/SummaryPanel/SumMargin/SumVBox"]
+[node name="LblSumTitle" type="Label" parent="ShopPanel/Margin/RootVBox/SummaryPanel/SumMargin/SumVBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 14
 theme_override_colors/font_color = Color(0.604, 0.655, 0.753, 1)
 text = "当日结算"
 
-[node name="LblSummary" type="Label" parent="ShopPanel/Margin/RootVBox/MidArea/SummaryPanel/SumMargin/SumVBox"]
+[node name="LblSummary" type="Label" parent="ShopPanel/Margin/RootVBox/SummaryPanel/SumMargin/SumVBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 13
 autowrap_mode = 3
 text = "..."
 
-[node name="DeckPanel" type="PanelContainer" parent="ShopPanel/Margin/RootVBox/MidArea"]
-layout_mode = 2
-custom_minimum_size = Vector2(580, 140)
-
-[node name="DeckMargin" type="MarginContainer" parent="ShopPanel/Margin/RootVBox/MidArea/DeckPanel"]
-layout_mode = 2
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 10
-
-[node name="DeckVBox" type="VBoxContainer" parent="ShopPanel/Margin/RootVBox/MidArea/DeckPanel/DeckMargin"]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="LblDeckTitle" type="Label" parent="ShopPanel/Margin/RootVBox/MidArea/DeckPanel/DeckMargin/DeckVBox"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 14
-theme_override_colors/font_color = Color(0.604, 0.655, 0.753, 1)
-text = "当前牌组预览"
-
-[node name="DeckPreview" type="RichTextLabel" parent="ShopPanel/Margin/RootVBox/MidArea/DeckPanel/DeckMargin/DeckVBox"]
-layout_mode = 2
-custom_minimum_size = Vector2(0, 100)
-bbcode_enabled = true
-theme_override_font_sizes/normal_font_size = 12
-
 [node name="Tabs" type="TabContainer" parent="ShopPanel/Margin/RootVBox"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 360)
+custom_minimum_size = Vector2(0, 440)
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="买卡" type="ScrollContainer" parent="ShopPanel/Margin/RootVBox/Tabs"]
-layout_mode = 2
+[node name="买卡" parent="ShopPanel/Margin/RootVBox/Tabs" instance=ExtResource("2_buy")]
 
-[node name="BuyGrid" type="HBoxContainer" parent="ShopPanel/Margin/RootVBox/Tabs/买卡"]
-layout_mode = 2
-theme_override_constants/separation = 12
+[node name="升级" parent="ShopPanel/Margin/RootVBox/Tabs" instance=ExtResource("3_upgrade")]
 
-[node name="升级" type="ScrollContainer" parent="ShopPanel/Margin/RootVBox/Tabs"]
-layout_mode = 2
-
-[node name="UpgradeList" type="VBoxContainer" parent="ShopPanel/Margin/RootVBox/Tabs/升级"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_constants/separation = 4
-
-[node name="删卡" type="ScrollContainer" parent="ShopPanel/Margin/RootVBox/Tabs"]
-layout_mode = 2
-
-[node name="DeleteList" type="VBoxContainer" parent="ShopPanel/Margin/RootVBox/Tabs/删卡"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_constants/separation = 4
+[node name="删卡" parent="ShopPanel/Margin/RootVBox/Tabs" instance=ExtResource("4_delete")]
 
 [node name="BottomBar" type="HBoxContainer" parent="ShopPanel/Margin/RootVBox"]
 layout_mode = 2

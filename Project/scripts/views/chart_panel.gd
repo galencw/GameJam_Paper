@@ -1,22 +1,137 @@
 extends Panel
 
 const UF = preload("res://scripts/views/ui_factory.gd")
+const Effects = preload("res://scripts/views/effects.gd")
 
 @onready var k_chart: Control = $KChart
+@onready var tooltip = $Tooltip
+@onready var flash_overlay: ColorRect = $FlashOverlay
+
+# Cached layout from last _draw_intraday for hover detection
+var _intraday_layout: Dictionary = {}
+var _daily_layout: Dictionary = {}
 
 
 func _ready() -> void:
 	add_theme_stylebox_override("panel", UF.panel_stylebox())
 	k_chart.draw.connect(_on_draw_chart)
+	k_chart.mouse_filter = Control.MOUSE_FILTER_PASS
+	k_chart.mouse_exited.connect(_on_k_chart_mouse_exited)
 	Game.state_changed.connect(func(): _queue_redraw())
 	Game.candle_committed.connect(func(_t): _queue_redraw())
-	Game.intraday_updated.connect(func(): _queue_redraw())
+	Game.intraday_updated.connect(_on_intraday_updated)
 	Game.turn_ended.connect(func(_d, _t): _queue_redraw())
+
+
+func _process(_delta: float) -> void:
+	if k_chart and k_chart.get_global_rect().has_point(get_global_mouse_position()):
+		_update_tooltip(k_chart.get_local_mouse_position())
+	elif tooltip and tooltip.visible:
+		tooltip.hide_tooltip()
+
+
+func _on_k_chart_mouse_exited() -> void:
+	if tooltip:
+		tooltip.hide_tooltip()
+
+
+func _update_tooltip(local_pos: Vector2) -> void:
+	if tooltip == null:
+		return
+	if not _daily_layout.is_empty():
+		var d_area: Rect2 = _daily_layout["area"]
+		if d_area.has_point(local_pos):
+			_show_daily_tooltip(local_pos)
+			return
+	if not _intraday_layout.is_empty():
+		var i_area: Rect2 = _intraday_layout["area"]
+		if i_area.has_point(local_pos):
+			_show_intraday_tooltip(local_pos)
+			return
+	tooltip.hide_tooltip()
+
+
+func _show_daily_tooltip(local_pos: Vector2) -> void:
+	var slot_w: float = _daily_layout["slot_w"]
+	var draw_x: float = _daily_layout["draw_x"]
+	var slot_idx: int = int((local_pos.x - draw_x) / slot_w)
+	var turn: int = slot_idx + 1
+	var daily_candles: Array = _daily_layout["candles"]
+	var found: Dictionary = {}
+	for c in daily_candles:
+		if int(c["turn_in_day"]) == turn:
+			found = c
+			break
+	if found.is_empty():
+		tooltip.hide_tooltip()
+		return
+	var pct: float = 0.0
+	var op_val: float = float(found["open"])
+	if op_val > 0.001:
+		pct = (float(found["close"]) / op_val - 1.0) * 100.0
+	var cards: Array = found.get("cards", [])
+	if found.has("_floating") and cards.is_empty():
+		for ic in Game.intraday_candles:
+			if ic["kind"] == "play":
+				cards.append(String(ic["card_name"]))
+	var cards_text: String = ""
+	if not cards.is_empty():
+		cards_text = "出牌: " + ", ".join(cards)
+	var candle_data: Dictionary = {
+		"card_name": "回合 %d" % turn,
+		"price_delta_pct": pct,
+		"ohlc": "开%.2f 高%.2f 低%.2f 收%.2f" % [float(found["open"]), float(found["high"]), float(found["low"]), float(found["close"])],
+	}
+	if cards_text != "":
+		candle_data["cards_played"] = cards_text
+	var area: Rect2 = _daily_layout["area"]
+	var slot_cx: float = draw_x + (float(turn) - 0.5) * slot_w
+	var anchor := Vector2(k_chart.position.x + slot_cx + slot_w * 0.5 + 4, k_chart.position.y + area.position.y + 8)
+	tooltip.show_at(candle_data, anchor)
+
+
+func _show_intraday_tooltip(local_pos: Vector2) -> void:
+	var slot_w: float = _intraday_layout["slot_w"]
+	var draw_x: float = _intraday_layout["draw_x"]
+	var idx: int = int((local_pos.x - draw_x) / slot_w)
+	var candles_arr: Array = Game.intraday_candles
+	if idx < 0 or idx >= candles_arr.size():
+		tooltip.hide_tooltip()
+		return
+	var candle: Dictionary = candles_arr[idx]
+	var source: String = "玩家出牌" if candle.get("kind", "") == "play" else "市场波动"
+	var data: Dictionary = candle.duplicate()
+	data["source"] = source
+	var area: Rect2 = _intraday_layout["area"]
+	var slot_cx: float = draw_x + (float(idx) + 0.5) * slot_w
+	var anchor := Vector2(k_chart.position.x + slot_cx + slot_w * 0.5 + 4, k_chart.position.y + area.position.y + 8)
+	tooltip.show_at(data, anchor)
+
+
+func _on_intraday_updated() -> void:
+	_queue_redraw()
+	var candles: Array = Game.intraday_candles
+	if candles.is_empty():
+		return
+	var last: Dictionary = candles[candles.size() - 1]
+	var price_pct: float = float(last.get("price_delta_pct", 0.0))
+	if abs(price_pct) >= 1.5:
+		Effects.shake_node(get_tree().root.get_node_or_null("Main"), 4.0, 0.18)
+		var flash_color: Color = UF.COL_UP if price_pct > 0.0 else UF.COL_DOWN
+		Effects.flash_rect(flash_overlay, flash_color, 0.30)
 
 
 func _queue_redraw() -> void:
 	if k_chart:
 		k_chart.queue_redraw()
+
+
+func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
+	return typeof(data) == TYPE_DICTIONARY and data.has("card_index")
+
+
+func _drop_data(_at_position: Vector2, data: Variant) -> void:
+	Game.play_card(int(data["card_index"]))
 
 
 func _on_draw_chart() -> void:
@@ -27,8 +142,8 @@ func _on_draw_chart() -> void:
 	var split: float = h * 0.55 - 4.0
 	var top := Rect2(0, 0, w, split)
 	var bot := Rect2(0, split + 8, w, h - split - 8)
-	_draw_section_label(top, "回合 K (本天蜡烛)", UF.COL_GOLD)
-	_draw_section_label(bot, "分时 K (本回合)", UF.COL_HIGHLIGHT)
+	_draw_section_label(top, "小时 K (本天蜡烛)", UF.COL_GOLD)
+	_draw_section_label(bot, "分钟 K (本回合)", UF.COL_HIGHLIGHT)
 	_draw_daily_candles(top)
 	_draw_intraday(bot)
 
@@ -64,9 +179,10 @@ func _draw_daily_candles(r: Rect2) -> void:
 		})
 
 	if todays.is_empty():
+		_daily_layout = {}
 		k_chart.draw_string(
 			ThemeDB.fallback_font, Vector2(r.position.x + 8, r.position.y + r.size.y * 0.55),
-			"等待回合结算后生成回合 K...", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, UF.COL_TEXT_DIM)
+			"等待回合结算后生成小时 K...", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, UF.COL_TEXT_DIM)
 		return
 
 	var p_min: float = todays[0]["low"]
@@ -95,6 +211,12 @@ func _draw_daily_candles(r: Rect2) -> void:
 
 	var slot_w: float = draw_w / float(Game.TURNS_PER_DAY)
 	var body_w: float = max(slot_w * 0.65, 6.0)
+	_daily_layout = {
+		"area": Rect2(draw_x, draw_y, draw_w, draw_h),
+		"draw_x": draw_x,
+		"slot_w": slot_w,
+		"candles": todays,
+	}
 	for c in todays:
 		var t: int = int(c["turn_in_day"])
 		var slot_x: float = draw_x + (float(t) - 0.5) * slot_w
@@ -144,6 +266,13 @@ func _draw_intraday(r: Rect2) -> void:
 	var slot_count: int = 10
 	var slot: float = draw_w / float(slot_count)
 	var body_w: float = max(slot * 0.55, 3.0)
+
+	# Cache layout for hover detection in _update_tooltip
+	_intraday_layout = {
+		"area": Rect2(draw_x, draw_y, draw_w, draw_h),
+		"draw_x": draw_x,
+		"slot_w": slot,
+	}
 
 	if candles.is_empty():
 		var y: float = draw_y + draw_h * 0.5
