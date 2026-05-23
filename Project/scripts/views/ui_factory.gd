@@ -106,10 +106,28 @@ static func fmt_money(v: float) -> String:
 
 
 static func kind_color(kind: int) -> Color:
-	# 与原 main.gd _kind_color 保持一致, kind 来自 Card.Kind 枚举
 	match kind:
-		0: return COL_GREEN     # BUY
-		1: return COL_RED       # SELL
-		2: return COL_BLUE      # SKILL
-		3: return COL_HIGHLIGHT # EVENT
+		0: return COL_UP        # BUY
+		1: return COL_DOWN      # SELL
+		2: return COL_HIGHLIGHT # SKILL
+		3: return COL_GOLD      # EVENT
 	return COL_TEXT
+
+
+static func ap_dots(n: int, max_ap: int) -> String:
+	var out := ""
+	for i in range(max_ap):
+		out += "●" if i < n else "○"
+		if i < max_ap - 1:
+			out += " "
+	return out
+
+
+static func weekday_name(d: int) -> String:
+	match d:
+		1: return "(周一)"
+		2: return "(周二)"
+		3: return "(周三)"
+		4: return "(周四)"
+		5: return "(周五)"
+	return ""

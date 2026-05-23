@@ -1,0 +1,23 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/views/chart_panel.gd" id="1_script"]
+
+[node name="ChartPanel" type="Panel"]
+offset_right = 820.0
+offset_bottom = 412.0
+script = ExtResource("1_script")
+
+[node name="LblTitle" type="Label" parent="."]
+offset_left = 10.0
+offset_top = 4.0
+offset_right = 400.0
+offset_bottom = 18.0
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.604, 0.655, 0.753, 1)
+text = "价格图表  (上: 回合K · 下: 分时K)"
+
+[node name="KChart" type="Control" parent="."]
+offset_left = 10.0
+offset_top = 22.0
+offset_right = 810.0
+offset_bottom = 406.0

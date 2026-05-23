@@ -1,0 +1,187 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/views/shop_overlay.gd" id="1_script"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_shop"]
+bg_color = Color(0.106, 0.165, 0.255, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1, 0.682, 0.259, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_left = 4
+corner_radius_bottom_right = 4
+
+[node name="ShopOverlay" type="Control"]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Dim" type="ColorRect" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.04, 0.07, 0.13, 0.9)
+
+[node name="ShopPanel" type="PanelContainer" parent="."]
+offset_left = 40.0
+offset_top = 24.0
+offset_right = 1240.0
+offset_bottom = 696.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_shop")
+
+[node name="Margin" type="MarginContainer" parent="ShopPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 14
+
+[node name="RootVBox" type="VBoxContainer" parent="ShopPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TopBar" type="HBoxContainer" parent="ShopPanel/Margin/RootVBox"]
+layout_mode = 2
+theme_override_constants/separation = 24
+
+[node name="LblShopTitle" type="Label" parent="ShopPanel/Margin/RootVBox/TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+theme_override_colors/font_color = Color(1, 0.682, 0.259, 1)
+text = "盘后商店"
+
+[node name="Sep" type="Label" parent="ShopPanel/Margin/RootVBox/TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(0.604, 0.655, 0.753, 1)
+text = "|"
+
+[node name="LblShopDay" type="Label" parent="ShopPanel/Margin/RootVBox/TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "第 1 / 5 天 结束"
+
+[node name="Spacer" type="Control" parent="ShopPanel/Margin/RootVBox/TopBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="LblCashTitle" type="Label" parent="ShopPanel/Margin/RootVBox/TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.604, 0.655, 0.753, 1)
+text = "当前现金"
+
+[node name="LblShopCash" type="Label" parent="ShopPanel/Margin/RootVBox/TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(1, 0.82, 0.4, 1)
+text = "¥100,000"
+
+[node name="TopSep" type="HSeparator" parent="ShopPanel/Margin/RootVBox"]
+layout_mode = 2
+
+[node name="MidArea" type="HBoxContainer" parent="ShopPanel/Margin/RootVBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="SummaryPanel" type="PanelContainer" parent="ShopPanel/Margin/RootVBox/MidArea"]
+layout_mode = 2
+custom_minimum_size = Vector2(560, 140)
+
+[node name="SumMargin" type="MarginContainer" parent="ShopPanel/Margin/RootVBox/MidArea/SummaryPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="SumVBox" type="VBoxContainer" parent="ShopPanel/Margin/RootVBox/MidArea/SummaryPanel/SumMargin"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="LblSumTitle" type="Label" parent="ShopPanel/Margin/RootVBox/MidArea/SummaryPanel/SumMargin/SumVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.604, 0.655, 0.753, 1)
+text = "当日结算"
+
+[node name="LblSummary" type="Label" parent="ShopPanel/Margin/RootVBox/MidArea/SummaryPanel/SumMargin/SumVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+autowrap_mode = 3
+text = "..."
+
+[node name="DeckPanel" type="PanelContainer" parent="ShopPanel/Margin/RootVBox/MidArea"]
+layout_mode = 2
+custom_minimum_size = Vector2(580, 140)
+
+[node name="DeckMargin" type="MarginContainer" parent="ShopPanel/Margin/RootVBox/MidArea/DeckPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="DeckVBox" type="VBoxContainer" parent="ShopPanel/Margin/RootVBox/MidArea/DeckPanel/DeckMargin"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="LblDeckTitle" type="Label" parent="ShopPanel/Margin/RootVBox/MidArea/DeckPanel/DeckMargin/DeckVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.604, 0.655, 0.753, 1)
+text = "当前牌组预览"
+
+[node name="DeckPreview" type="RichTextLabel" parent="ShopPanel/Margin/RootVBox/MidArea/DeckPanel/DeckMargin/DeckVBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 100)
+bbcode_enabled = true
+theme_override_font_sizes/normal_font_size = 12
+
+[node name="Tabs" type="TabContainer" parent="ShopPanel/Margin/RootVBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 360)
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="买卡" type="ScrollContainer" parent="ShopPanel/Margin/RootVBox/Tabs"]
+layout_mode = 2
+
+[node name="BuyGrid" type="HBoxContainer" parent="ShopPanel/Margin/RootVBox/Tabs/买卡"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="升级" type="ScrollContainer" parent="ShopPanel/Margin/RootVBox/Tabs"]
+layout_mode = 2
+
+[node name="UpgradeList" type="VBoxContainer" parent="ShopPanel/Margin/RootVBox/Tabs/升级"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="删卡" type="ScrollContainer" parent="ShopPanel/Margin/RootVBox/Tabs"]
+layout_mode = 2
+
+[node name="DeleteList" type="VBoxContainer" parent="ShopPanel/Margin/RootVBox/Tabs/删卡"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="BottomBar" type="HBoxContainer" parent="ShopPanel/Margin/RootVBox"]
+layout_mode = 2
+alignment = 2
+
+[node name="BtnLeaveShop" type="Button" parent="ShopPanel/Margin/RootVBox/BottomBar"]
+layout_mode = 2
+custom_minimum_size = Vector2(280, 44)
+theme_override_font_sizes/font_size = 16
+text = "离开商店, 进入下一天 →"
