@@ -21,7 +21,8 @@ var SETTLE_DISCOUNT: float = 0.5              # 周五未卖筹码强制折价
 var FIRST_TURN_DRAW: int = 6                  # 第一回合摸 6 张
 var TURN_DRAW: int = 2                        # 此后每回合摸 2 张
 var HAND_LIMIT: int = 10
-var ACTION_POINTS_PER_TURN: int = 3
+var ACTION_POINTS_INITIAL: int = 2
+var ACTION_POINTS_MAX: int = 6
 
 # ===== 情绪参数 =====
 var INITIAL_BULL: int = 50                    # 初始上涨情绪
@@ -120,7 +121,8 @@ func _apply_balance_from_cfg() -> void:
 	if b.has("FIRST_TURN_DRAW"): FIRST_TURN_DRAW = int(b["FIRST_TURN_DRAW"])
 	if b.has("TURN_DRAW"): TURN_DRAW = int(b["TURN_DRAW"])
 	if b.has("HAND_LIMIT"): HAND_LIMIT = int(b["HAND_LIMIT"])
-	if b.has("ACTION_POINTS_PER_TURN"): ACTION_POINTS_PER_TURN = int(b["ACTION_POINTS_PER_TURN"])
+	if b.has("ACTION_POINTS_INITIAL"): ACTION_POINTS_INITIAL = int(b["ACTION_POINTS_INITIAL"])
+	if b.has("ACTION_POINTS_MAX"): ACTION_POINTS_MAX = int(b["ACTION_POINTS_MAX"])
 	if b.has("INITIAL_BULL"): INITIAL_BULL = int(b["INITIAL_BULL"])
 	if b.has("EMOTION_TOTAL"): EMOTION_TOTAL = int(b["EMOTION_TOTAL"])
 	if b.has("NATURAL_DRIFT_CLAMP"): NATURAL_DRIFT_CLAMP = float(b["NATURAL_DRIFT_CLAMP"])
@@ -142,7 +144,7 @@ func new_level() -> void:
 	day = 0
 	turn_in_day = 0
 	turn_global = 0
-	action_points = 0
+	action_points = ACTION_POINTS_INITIAL
 	hand.clear()
 	discard_pile.clear()
 	draw_pile = CardDatabase.build_starter_deck()
@@ -339,6 +341,7 @@ func _start_day() -> void:
 	day += 1
 	turn_in_day = 0
 	day_open_price = price
+	action_points = ACTION_POINTS_INITIAL
 	day_open_assets = get_total_assets()
 	_log("==== 第 %d / %d 天 开盘 ¥%.2f ====" % [day, DAYS_PER_LEVEL, day_open_price])
 	emit_signal("day_started", day)
@@ -348,7 +351,7 @@ func _start_day() -> void:
 func _start_turn() -> void:
 	turn_in_day += 1
 	turn_global += 1
-	action_points = ACTION_POINTS_PER_TURN
+	action_points = min(action_points + 1, ACTION_POINTS_MAX)
 	# 本回合 OHLC 初始化
 	cur_open = price
 	cur_high = price
